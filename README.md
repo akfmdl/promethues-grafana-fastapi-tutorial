@@ -198,4 +198,56 @@ RSS 메모리 사용량 조회(app_memory_usage_bytes{type="rss"}) 대시보드 
 - 우측 상단의 Settings -> JSON Model에서 지금까지 만든 대시보드를 json 형태로 확인할 수 있습니다. 이 내용을 복사하여 [fastapi_dashboard.json](grafana/provisioning/dashboards/fastapi_dashboard.json) 파일에 붙여넣습니다.
 - 이후에는 grafana 볼륨이 삭제되어도 대시보드가 사라지지 않습니다.
 
-answer1 브랜치를 확인하시면 실습 정답을 확인할 수 있습니다.
+### 실습 2: 특정 엔드포인트를 추가하고 Counter 메트릭 추가하기
+
+특정 엔드포인트를 추가하고 호출될 때마다 메트릭을 증가시키는 방법을 알아보겠습니다.
+
+1. 메트릭 정의: [app/main.py](app/main.py) 파일에 아래와 같이 추가합니다.
+```python
+INCREASE_COUNT = Counter(
+    "app_increase_count_total",
+    "Total count of calls to increase_count endpoint",
+)
+```
+
+2. 엔드포인트 구현: [app/main.py](app/main.py) 파일에 새로운 엔드포인트를 추가합니다.
+```python
+@app.get("/increase_count")
+async def increase_count():
+    INCREASE_COUNT.inc()
+    return {"message": "Count increased"}
+```
+
+3. 호출해보기:
+```bash
+for i in {1..10}; do curl http://localhost:8000/increase_count; done
+```
+
+3. Prometheus에서 확인: increase_count 엔드포인트가 10번 호출되었으므로 10이 출력되어야 합니다.
+```
+# 증가한 카운트 수 조회
+app_increase_count_total
+```
+
+4. 대시보드 구현: 실습 1과 같이 Grafana UI를 통해 만든 후 export 하여 [fastapi_dashboard.json](grafana/provisioning/dashboards/fastapi_dashboard.json) 파일에 붙여넣습니다.
+- 대시보드 1
+    - Title: Increase Count 총 호출 수
+    - Visualization 타입: Stat
+    - Query: app_increase_count_total
+    - Query options:
+        - Legend: 총 호출 수
+- 대시보드 2
+    - Title: Increase Count 호출 비율 (최근 1분)
+    - Visualization 타입: Time series
+    - Panel options:
+        - Values: Mean, Max
+    - Query: rate(app_increase_count_total[1m])
+    - Query options:
+        - Legend: 호출/초
+
+### 정답 확인
+answer 브랜치를 확인하시면 실습 정답을 확인할 수 있습니다.
+
+```bash
+git checkout answer
+```
