@@ -13,7 +13,11 @@ app = FastAPI(redirect_slashes=False)
 EXCLUDED_PATHS = ["/favicon.ico", "/docs", "/redoc", "/openapi.json", "/metrics"]
 
 # Prometheus 메트릭 생성
-REQUESTS = Counter("app_requests_total", "Total count of requests by method and path.", ["method", "path"])
+REQUESTS = Counter(
+    "app_requests_total",
+    "Total count of requests by method and path.",
+    ["method", "path"],
+)
 
 RESPONSES = Counter(
     "app_responses_total",
@@ -29,6 +33,12 @@ REQUESTS_PROCESSING_TIME = Histogram(
 
 # 메모리 사용량을 모니터링하는 Gauge 메트릭
 MEMORY_USAGE = Gauge("app_memory_usage_bytes", "Current memory usage of the application in bytes", ["type"])
+
+# increase_count 엔드포인트 호출을 카운트하는 Counter 메트릭
+INCREASE_COUNT = Counter(
+    "app_increase_count_total",
+    "Total count of calls to increase_count endpoint",
+)
 
 
 # Prometheus 메트릭을 직접 경로로 제공
@@ -79,3 +89,9 @@ async def random_sleep():
 @app.get("/health")
 async def health_check():
     return JSONResponse(content={"status": "ok"}, status_code=200)
+
+
+@app.get("/increase_count")
+async def increase_count():
+    INCREASE_COUNT.inc()
+    return {"count": INCREASE_COUNT._value.get()}
