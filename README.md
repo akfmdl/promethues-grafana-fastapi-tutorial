@@ -127,7 +127,7 @@ for i in {1..100}; do curl http://localhost:8000/random_sleep; done
 
 ![Flow Diagram](flow.png)
 
-### 실습: 메모리 사용량 모니터링 메트릭 추가하기
+### 실습 1: 메모리 사용량 모니터링 메트릭 추가하기
 
 애플리케이션의 메모리 사용량을 모니터링하는 Gauge 메트릭을 직접 [main.py](app/main.py)에 추가해주시기 바랍니다.
 
@@ -167,7 +167,7 @@ async def monitor_requests(request: Request, call_next):
 app_memory_usage_bytes{type="rss"}
 
 # VMS 메모리 사용량 조회
-app_memory_usage_bytes{type="vms"}
+    app_memory_usage_bytes{type="vms"}
 ```
 
 이 메트릭은 다음과 같은 특징이 있습니다:
@@ -178,4 +178,24 @@ app_memory_usage_bytes{type="vms"}
 이 메트릭을 Grafana 대시보드에 추가하면 애플리케이션의 메모리 사용량을 실시간으로 모니터링할 수 있습니다.
 
 5. 대시보드에 추가:
-json 파일에 직접 개발하는 것은 힘들기 때문에 Grafana 대시보드를 만드는 팁을 알려드리겠습니다. 먼저 http://localhost:3000/ 에 접속합니다.
+json 파일에 직접 개발하는 것은 힘들기 때문에 Grafana UI를 통해 만든 후 export 하여 사용하는 것을 추천드립니다. 먼저 http://localhost:3000/ 에 접속합니다.
+
+RSS 메모리 사용량 조회(app_memory_usage_bytes{type="rss"}) 대시보드 추가 예시
+- 상단 메뉴에서 Edit 버튼을 클릭 -> Add -> Visualization 을 클릭합니다.
+- 우측 Visualization 타입을 Time series 로 선택합니다.
+- 우측 Panel options를 아래와 같이 세팅합니다.
+    - Title: 실제 메모리 사용량 (RSS)
+    - Values: Mean, Max 선택
+    - Standard options에서 Unit을 bytes(IEC)로 선택합니다.
+- 좌측 하단의 Queries 에서 아래와 같이 세팅합니다.
+    - 쿼리 타입은 기본 Builder로 설정되어 있습니다. Code로 변경하면 쿼리를 직접 작성할 수 있습니다. app_memory_usage_bytes{type="rss"}를 입력합니다.
+    - 바로 밑에 Options 탭에서 아래와 같이 세팅합니다.
+        - Legend: Custom으로 선택 후 RSS 메모리 입력
+- VMS 메모리 사용량 조회(app_memory_usage_bytes{type="vms"}) 대시보드도 위와 같은 방법으로 추가합니다.
+    - Title: 가상 메모리 사용량 (VMS)
+    - 쿼리는 app_memory_usage_bytes{type="vms"}로 입력합니다.
+- 우측 상단의 Save 버튼을 클릭하여 저장합니다.
+- 우측 상단의 Settings -> JSON Model에서 지금까지 만든 대시보드를 json 형태로 확인할 수 있습니다. 이 내용을 복사하여 [fastapi_dashboard.json](grafana/provisioning/dashboards/fastapi_dashboard.json) 파일에 붙여넣습니다.
+- 이후에는 grafana 볼륨이 삭제되어도 대시보드가 사라지지 않습니다.
+
+answer1 브랜치를 확인하시면 실습 정답을 확인할 수 있습니다.
