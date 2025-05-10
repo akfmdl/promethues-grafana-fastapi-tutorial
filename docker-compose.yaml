@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  prometheus:
+    image: bitnami/prometheus:3.3.1
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # 컨테이너 내부에서 Host로 접근하기 위한 설정
+
+  grafana:
+    image: grafana/grafana:12.0.0
+    container_name: grafana
+    restart: unless-stopped
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+    ports:
+      - "3000:3000"
+    networks:
+      - monitoring-network
+    depends_on:
+      - prometheus
+
+volumes:
+  grafana-storage:
+
+networks:
+  monitoring-network:
+    driver: bridge 

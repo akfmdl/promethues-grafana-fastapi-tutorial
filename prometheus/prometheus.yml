@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s # Prometheus가 각 타겟에서 메트릭을 수집하는 간격
+  evaluation_interval: 15s # 정의된 규칙(예: 알림 규칙)을 평가하는 간격
+
+# 모니터링(scraping)할 타겟을 수동으로 지정
+# scrape_interval 에 지정된 간격으로 메트릭을 수집합니다.
+scrape_configs:
+  # 자기 자신을 수집하는 설정
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"] # bridge 네트워크에서 실행 중인 Prometheus
+
+  # 외부 앱을 수집하는 설정
+  - job_name: "fastapi"
+    static_configs:
+      - targets: ["host.docker.internal:8000"] # host 에서 실행 중인 FastAPI 앱
+    metrics_path: /metrics
