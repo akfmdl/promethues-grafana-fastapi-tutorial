@@ -2,9 +2,10 @@ import asyncio
 import random
 import time
 
+import psutil
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 app = FastAPI(redirect_slashes=False)
 
@@ -26,6 +27,9 @@ REQUESTS_PROCESSING_TIME = Histogram(
     ["method", "path"],
 )
 
+# 메모리 사용량을 모니터링하는 Gauge 메트릭
+MEMORY_USAGE = Gauge("app_memory_usage_bytes", "Current memory usage of the application in bytes", ["type"])
+
 
 # Prometheus 메트릭을 직접 경로로 제공
 @app.get("/metrics")
@@ -37,6 +41,11 @@ async def metrics():
 async def monitor_requests(request: Request, call_next):
     method = request.method
     path = request.url.path
+
+    # 메모리 사용량 업데이트
+    process = psutil.Process()
+    MEMORY_USAGE.labels(type="rss").set(process.memory_info().rss)
+    MEMORY_USAGE.labels(type="vms").set(process.memory_info().vms)
 
     # 메트릭 수집에서 제외할 경로 체크 (모니터링에서 제외할 경로)
     if path not in EXCLUDED_PATHS:
