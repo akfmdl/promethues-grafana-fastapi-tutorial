@@ -27,7 +27,7 @@ uvicorn main:app --host 0.0.0.0 --port $FASTAPI_PORT --reload
 
 ### 3. Prometheus의 scrape_configs 설정
 
-타겟 FastAPI 서버가 아래와 같이 기본 8000 포트로 설정되어있습니다. 이 포트를 위에서 설정한 $FASTAPI_PORT로 변경합니다.
+[prometheus.yml](prometheus/prometheus.yml) 파일에는 타겟 FastAPI 서버가 아래와 같이 기본 8000 포트로 설정되어있습니다. 이 포트를 위에서 설정한 $FASTAPI_PORT로 변경합니다.
 
 ```yaml
 - job_name: "fastapi"
@@ -309,6 +309,47 @@ answer 브랜치를 확인하시면 실습 정답을 확인할 수 있습니다.
 ```bash
 git checkout answer
 ```
+
+FastAPI 애플리케이션 시작
+
+```bash
+FASTAPI_PORT=30000
+while [ $FASTAPI_PORT -le 32767 ]; do
+    if ! timeout 1 bash -c ">/dev/tcp/localhost/$FASTAPI_PORT" 2>/dev/null && ! kubectl get svc -A -o jsonpath='{.items[*].spec.ports[*].nodePort}' 2>/dev/null | grep -q "$FASTAPI_PORT"; then
+        break
+    fi
+    FASTAPI_PORT=$((FASTAPI_PORT + 1))
+done
+echo "FASTAPI_PORT: $FASTAPI_PORT"
+cd app
+uvicorn main:app --host 0.0.0.0 --port $FASTAPI_PORT --reload
+```
+
+Prometheus scrape_configs 설정: [prometheus.yml](prometheus/prometheus.yml) 파일을 수정합니다.
+
+```yaml
+- job_name: "fastapi"
+  static_configs:
+    - targets: ["host.docker.internal:$FASTAPI_PORT"] # host 에서 실행 중인 FastAPI 앱
+    metrics_path: /metrics
+```
+
+Prometheus, Grafana 실행
+
+```bash
+sudo docker-compose up -d
+```
+
+Grafana 대시보드 확인
+
+```bash
+GRAFANA_PORT=$(sudo docker ps --format "{{.ID}} {{.Names}}" | grep grafana | awk '{print $1}' | xargs -I {} sudo docker port {} | awk -F'->' '{print $2}' | awk -F':' '{print $2}' | tr -d ' ')
+echo GRAFANA_PORT=$GRAFANA_PORT
+echo "http://localhost:$GRAFANA_PORT"
+```
+
+
+
 
 ### 정리하기
 
