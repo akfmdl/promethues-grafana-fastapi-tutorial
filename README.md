@@ -28,6 +28,8 @@ export SERVICE_PORT=$SERVICE_PORT
 echo $SERVICE_PORT
 ```
 
+fastapi 서버를 실행합니다.
+
 ```bash
 cd app
 uvicorn main:app --host 0.0.0.0 --port $SERVICE_PORT --reload
