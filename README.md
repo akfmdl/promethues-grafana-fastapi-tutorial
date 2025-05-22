@@ -10,29 +10,37 @@ pip install -r requirements.txt
 ```
 
 ### 2. FastAPI 애플리케이션 실행 (로컬)
-* FASTAPI_PORT: 30000-32767 범위 내에서 사용 가능한 포트 중 하나를 선택합니다. 이 포트는 k8s nodeport 포트 포함 모든 사용 중인 포트를 제외한 포트입니다.
+* SERVICE_PORT: 30000-32767 범위 내에서 사용 가능한 포트 중 하나를 선택합니다. 이 포트는 k8s nodeport 포트 포함 모든 사용 중인 포트를 제외한 포트입니다.
 
 ```bash
-FASTAPI_PORT=30000
-while [ $FASTAPI_PORT -le 32767 ]; do
-    if ! timeout 1 bash -c ">/dev/tcp/localhost/$FASTAPI_PORT" 2>/dev/null && ! kubectl get svc -A -o jsonpath='{.items[*].spec.ports[*].nodePort}' 2>/dev/null | grep -q "$FASTAPI_PORT"; then
+SERVICE_PORT=30000
+while [ $SERVICE_PORT -le 32767 ]; do
+    if ! timeout 1 bash -c ">/dev/tcp/localhost/$SERVICE_PORT" 2>/dev/null && ! kubectl get svc -A -o jsonpath='{.items[*].spec.ports[*].nodePort}' 2>/dev/null | grep -q "$SERVICE_PORT"; then
         break
     fi
-    FASTAPI_PORT=$((FASTAPI_PORT + 1))
+    SERVICE_PORT=$((SERVICE_PORT + 1))
 done
-echo "FASTAPI_PORT: $FASTAPI_PORT"
+export SERVICE_PORT=$SERVICE_PORT
+```
+
+어떤 포트로 할당될지 확인합니다.
+```bash
+echo $SERVICE_PORT
+```
+
+```bash
 cd app
-uvicorn main:app --host 0.0.0.0 --port $FASTAPI_PORT --reload
+uvicorn main:app --host 0.0.0.0 --port $SERVICE_PORT --reload
 ```
 
 ### 3. Prometheus의 scrape_configs 설정
 
-[prometheus.yml](prometheus/prometheus.yml) 파일에는 타겟 FastAPI 서버가 아래와 같이 기본 8000 포트로 설정되어있습니다. 이 포트를 위에서 설정한 $FASTAPI_PORT로 변경합니다.
+[prometheus.yml](prometheus/prometheus.yml) 파일에는 타겟 FastAPI 서버가 아래와 같이 기본 8000 포트로 설정되어있습니다. 이 포트를 위에서 설정한 $SERVICE_PORT로 변경합니다.
 
 ```yaml
 - job_name: "fastapi"
   static_configs:
-    - targets: ["host.docker.internal:$FASTAPI_PORT"] # host 에서 실행 중인 FastAPI 앱
+    - targets: ["host.docker.internal:$SERVICE_PORT"] # host 에서 실행 중인 FastAPI 앱
     metrics_path: /metrics
 ```
 
@@ -52,9 +60,9 @@ echo GRAFANA_PORT=$GRAFANA_PORT
 ```
 
 ### 5. 서비스 접속 정보:
-- FastAPI: http://localhost:$FASTAPI_PORT
-- FastAPI Docs: http://localhost:$FASTAPI_PORT/docs
-- FastAPI Metrics: http://localhost:$FASTAPI_PORT/metrics
+- FastAPI: http://localhost:$SERVICE_PORT
+- FastAPI Docs: http://localhost:$SERVICE_PORT/docs
+- FastAPI Metrics: http://localhost:$SERVICE_PORT/metrics
 - Prometheus: http://localhost:$PROMETHEUS_PORT
 - Grafana: http://localhost:$GRAFANA_PORT (기본 계정: admin/admin)
 
@@ -71,7 +79,6 @@ echo GRAFANA_PORT=$GRAFANA_PORT
 
     - 메트릭 이름은 자유롭게 지정할 수 있습니다. 예를 들어, 메트릭 이름을 "app_requests_total"이 아니라 "app_requests_count"로 지정해도 됩니다.
     - 메트릭 레이블은 추후에 PromQL을 이용하여 메트릭을 조회할 때 필터링을 위해 사용됩니다. 예를 들어, app_requests_total{method="GET", path="/"} 와 같이 메트릭을 조회할 수 있습니다.
-    - /metrics 엔드포인트는 Prometheus에서 메트릭을 수집하기 위해 사용됩니다.
 
     ```python
     from prometheus_client import Counter
@@ -81,9 +88,18 @@ echo GRAFANA_PORT=$GRAFANA_PORT
     REQUESTS = Counter("app_requests_total", "Total count of requests by method and path.", ["method", "path"])
 
     # 메트릭 노출
+    # /metrics 엔드포인트는 Prometheus에서 메트릭을 수집하기 위해 사용됩니다.
     @app.get("/metrics")
     async def metrics():
         return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+    # 메트릭 수집
+    # app.middleware("http") 메서드는 모든 http 요청이 호출될 때마다 실행됩니다.
+    @app.middleware("http")
+    async def monitor_requests(request: Request, call_next):
+        REQUESTS.labels(method=request.method, path=request.url.path).inc() # inc() 메서드는 메트릭 값을 1 증가시킵니다.
+        response = await call_next(request)
+        return response
     ```
 - Prometheus의 메트릭 타입은 다음과 같습니다. 각 메트릭에 대한 사용법은 https://prometheus.io/docs/concepts/metric_types/ 를 참고하시기 바랍니다.
     - Counter: 오직 증가하거나 재시작 시 0으로 초기화되는 누적 메트릭입니다.
@@ -103,7 +119,7 @@ echo GRAFANA_PORT=$GRAFANA_PORT
     ```
 - 이렇게 쿼리한 결과는 다음과 같습니다.
     ```
-    app_requests_total{instance="host.docker.internal:$FASTAPI_PORT", job="fastapi", method="GET", path="/random_sleep"}         219
+    app_requests_total{instance="host.docker.internal:$SERVICE_PORT", job="fastapi", method="GET", path="/random_sleep"}         219
     ...
     ```
     이 결과는 총 219번의 GET 요청이 있었음을 의미합니다.
@@ -114,7 +130,9 @@ echo GRAFANA_PORT=$GRAFANA_PORT
 
 3. Grafana는 Prometheus에서 수집한 메트릭을 시각화합니다.
 - 그렇기 때문에 prometheus를 연동하기 위해 [datasource.yml](grafana/provisioning/datasources/datasource.yml) 과 같은 DataSource 설정이 필요합니다. 여기에 정의된 데이터소스를 통해 prometheus에 접근할 수 있습니다.
-- 또한, 대시보드를 통해 메트릭을 시각화할 수 있습니다. 이 대시보드는 [dashboard.yml](grafana/provisioning/dashboards/dashboard.yml) 파일에 정의되어 있습니다. 여기에 path: /etc/grafana/provisioning/dashboards 라고 정의되어 있으므로 이 경로에 대시보드 파일을 추가하면 자동으로 대시보드가 생성됩니다. docker-compose.yaml 파일에 grafana의 volumes 설정에 - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources 와 같이 마운트하고 있기 때문에 이 레포에 있는 대시보드 파일을 자동으로 인식합니다.
+- 또한, 대시보드를 통해 메트릭을 시각화할 수 있습니다. 이 대시보드는 [dashboard.yml](grafana/provisioning/dashboards/dashboard.yml) 파일에 정의되어 있습니다. 여기에 path: /etc/grafana/provisioning/dashboards 라고 정의되어 있으므로 이 경로에 대시보드 파일을 추가하면 자동으로 대시보드가 생성됩니다. docker-compose.yaml 파일에 grafana의 volumes 설정에 - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources 와 같이 마운트하고 있기 때문에 이 레포에 있는 대시보드 파일을 자동으로 인식합니다. 이 레포의 ./grafana/provisioning/datasources 경로에는 [fastapi_dashboard.json](grafana/provisioning/dashboards/fastapi_dashboard.json) 파일이 있기 때문에 이 파일에 정의되어있는 대시보드를 Grafana에서 볼 수 있습니다.
+
+다음은 FastAPI, Prometheus, Grafana의 연동 흐름을 나타낸 그림입니다.
 
 ![Flow Diagram](flow.png)
 
@@ -148,16 +166,16 @@ Grafana에 자동으로 "FastAPI 메트릭 대시보드"가 프로비저닝됩�
 
 ### 부하 테스트
 
-애플리케이션 부하 테스트를 위해 새로운 터미널을 열고 FASTAPI_PORT 환경변수를 설정합니다.
+애플리케이션 부하 테스트를 위해 새로운 터미널을 열고 SERVICE_PORT 환경변수를 설정합니다.
 
 ```bash
-FASTAPI_PORT=<위에서 할당받은 포트>
+SERVICE_PORT=<위에서 할당받은 포트>
 ```
 
 아래와 같이 `random_sleep` 엔드포인트를 호출해봅니다.
 
 ```bash
-for i in {1..10}; do curl http://localhost:$FASTAPI_PORT/random_sleep; done
+for i in {1..10}; do curl http://localhost:$SERVICE_PORT/random_sleep; done
 ```
 
 FastAPI 로그에서 /random_sleep 엔드포인트가 호출되는 것을 확인할 수 있습니다.
@@ -168,11 +186,17 @@ INFO:     127.0.0.1:48944 - "GET /random_sleep HTTP/1.1" 200 OK
 ...
 ```
 
+Prometheus 서버에서 직접 app_requests_total 메트릭을 조회해보면 다음과 같습니다. random_sleep을 10번을 호출했으니 10이 출력되어야 합니다.
+
+```bash
+app_requests_total{instance="host.docker.internal:$SERVICE_PORT", job="fastapi", method="GET", path="/random_sleep"} 10.0
+```
+
 그리고 Grafana 대시보드에서 어떤 변화가 발생하는지 확인해봅시다.
 이제 부하를 늘려봅시다. (약간의 지연이 발생할 수 있습니다.)
 
 ```bash
-for i in {1..100}; do curl http://localhost:$FASTAPI_PORT/random_sleep; done
+for i in {1..100}; do curl http://localhost:$SERVICE_PORT/random_sleep; done
 ```
 
 ### 실습 1: 메모리 사용량 모니터링 메트릭 추가하기
@@ -245,9 +269,9 @@ json 파일에 직접 개발하는 것은 힘들기 때문에 Grafana UI를 통�
     - Legend: Custom으로 선택 후 {{label_name}}를 'VMS 메모리' 로 변경
     - 상단의 Back to dashboard 버튼을 클릭하여 대시보드로 돌아갑니다.
 
-### 실습 2: 특정 엔드포인트를 추가하고 Counter 메트릭 추가하기
+### 실습 2: 엔드포인트를 추가하고 Counter 메트릭 추가하기
 
-특정 엔드포인트를 추가하고 호출될 때마다 메트릭을 증가시키는 방법을 알아보겠습니다.
+새로운 엔드포인트를 추가하고 호출될 때마다 메트릭을 증가시키는 방법을 알아보겠습니다.
 
 1. 메트릭 정의: [app/main.py](app/main.py) 파일에 아래와 같이 추가합니다.
 ```python
@@ -267,17 +291,17 @@ async def increase_count():
 
 3. 호출해보기:
 ```bash
-for i in {1..10}; do curl http://localhost:$FASTAPI_PORT/increase_count; done
+for i in {1..10}; do curl http://localhost:$SERVICE_PORT/increase_count; done
 ```
 
 4. Prometheus에서 확인: increase_count 엔드포인트가 10번 호출되었으므로 10이 출력되어야 합니다.
 ```bash
-app_increase_count_total
+app_increase_count_total{instance="host.docker.internal:$SERVICE_PORT", job="fastapi"} 10.0
 ```
 
-5. FastAPI /metrics 엔드포인트에서 확인: 브라우저에 http://localhost:$FASTAPI_PORT/metrics 에 접속하여 확인합니다.
+5. FastAPI /metrics 엔드포인트에서 확인: 브라우저에 http://localhost:$SERVICE_PORT/metrics 를 호출해서 확인할 수도 있습니다.
 ```bash
-app_increase_count_total 10.0
+app_increase_count_total{instance="host.docker.internal:$SERVICE_PORT", job="fastapi"} 10.0
 ```
 
 6. 대시보드 구현
@@ -298,58 +322,12 @@ app_increase_count_total 10.0
         - Legend: 호출/초
     - 상단의 Back to dashboard 버튼을 클릭하여 대시보드로 돌아갑니다.
 
-7. 대시보드 저장:
-- 실습 1, 2에서 만든 대시보드의 위치를 드래그 앤 드랍하여 정렬합니다.
-- 우측 상단의 Settings -> JSON Model에서 지금까지 만든 대시보드를 json 형태로 확인할 수 있습니다. 이 내용을 복사하여 [fastapi_dashboard.json](grafana/provisioning/dashboards/fastapi_dashboard.json) 파일에 붙여넣습니다.
-- 이후에는 grafana를 새로 고침해도 대시보드가 사라지지 않습니다.
-
 ### 정답 확인
-answer 브랜치를 확인하시면 실습 정답을 확인할 수 있습니다.
+answer 브랜치를 확인하시면 실습 정답을 확인할 수 있습니다. uvicorn 실행 시 --reload 옵션을 넣었기 때문에 체크아웃 하자마자 코드가 변경되어서 fastapi 서버가 자동으로 재시작됩니다. Grafana dashboard 파일도 변경되므로 새로고침을 하면 대시보드가 변경된 것을 확인할 수 있습니다.
 
 ```bash
 git checkout answer
 ```
-
-FastAPI 애플리케이션 시작
-
-```bash
-FASTAPI_PORT=30000
-while [ $FASTAPI_PORT -le 32767 ]; do
-    if ! timeout 1 bash -c ">/dev/tcp/localhost/$FASTAPI_PORT" 2>/dev/null && ! kubectl get svc -A -o jsonpath='{.items[*].spec.ports[*].nodePort}' 2>/dev/null | grep -q "$FASTAPI_PORT"; then
-        break
-    fi
-    FASTAPI_PORT=$((FASTAPI_PORT + 1))
-done
-echo "FASTAPI_PORT: $FASTAPI_PORT"
-cd app
-uvicorn main:app --host 0.0.0.0 --port $FASTAPI_PORT --reload
-```
-
-Prometheus scrape_configs 설정: [prometheus.yml](prometheus/prometheus.yml) 파일을 수정합니다.
-
-```yaml
-- job_name: "fastapi"
-  static_configs:
-    - targets: ["host.docker.internal:$FASTAPI_PORT"] # host 에서 실행 중인 FastAPI 앱
-    metrics_path: /metrics
-```
-
-Prometheus, Grafana 실행
-
-```bash
-sudo docker-compose up -d
-```
-
-Grafana 대시보드 확인
-
-```bash
-GRAFANA_PORT=$(sudo docker ps --format "{{.ID}} {{.Names}}" | grep grafana | awk '{print $1}' | xargs -I {} sudo docker port {} | awk -F'->' '{print $2}' | awk -F':' '{print $2}' | tr -d ' ')
-echo GRAFANA_PORT=$GRAFANA_PORT
-echo "http://localhost:$GRAFANA_PORT"
-```
-
-
-
 
 ### 정리하기
 
